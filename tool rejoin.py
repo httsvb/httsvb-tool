@@ -16,7 +16,6 @@ import random
 from urllib.parse import urlparse, parse_qs
 from http.cookiejar import CookieJar
 
-UPDATE_URL = "https://raw.githubusercontent.com/httsvb/httsvb-tool/refs/heads/main/tool%20rejoin.py"
 CONFIG_FILE = "roblox_tool_config.json"
 
 KNOWN_CLONES = [
@@ -52,7 +51,6 @@ def print_banner():
     clear_screen()
     print(f"{Colors.CYAN}{Colors.BOLD}╔═══════════════════════════════════════════╗{Colors.ENDC}")
     print(f"{Colors.CYAN}{Colors.BOLD}║        AUTO REJOIN | BY HTTSVB            ║{Colors.ENDC}")
-    print(f"{Colors.CYAN}{Colors.BOLD}║    {Colors.GREEN}Tool Treo Game & Quản lý Đa Năng{Colors.ENDC}{Colors.CYAN}       ║{Colors.ENDC}")
     print(f"{Colors.CYAN}{Colors.BOLD}╚═══════════════════════════════════════════╝{Colors.ENDC}")
     print(f"{Colors.HEADER} ► System: Android/Termux{Colors.ENDC}")
     print("---------------------------------------------")
@@ -63,11 +61,21 @@ def log(msg, type="info"):
     elif type == "warn": print(f"[{Colors.WARNING}!{Colors.ENDC}] {msg}")
     else: print(f"[*] {msg}")
 
+def reset_terminal():
+    """Reset trạng thái bàn phím để tránh bị đơ"""
+    try:
+        os.system('stty sane')
+    except: pass
+
 def safe_input(prompt):
+    """Nhập liệu an toàn, chống đơ"""
+    reset_terminal() # Reset trước khi nhập
     sys.stdout.flush()
     try:
         return input(prompt)
     except EOFError:
+        return ""
+    except KeyboardInterrupt:
         return ""
 
 def run_cmd_safe(cmd_list):
@@ -104,33 +112,22 @@ def delete_all_config():
         return True
     return False
 
-def update_tool():
-    print(f"\n{Colors.WARNING}>>> ĐANG CẬP NHẬT TOOL TỪ GITHUB... <<<{Colors.ENDC}")
-    try:
-        req = urllib.request.Request(UPDATE_URL)
-        with urllib.request.urlopen(req) as response:
-            content = response.read()
-            
-        with open(sys.argv[0], 'wb') as f:
-            f.write(content)
-            
-        print(f"{Colors.GREEN}Cập nhật thành công! Đang khởi động lại...{Colors.ENDC}")
-        time.sleep(1)
-        os.execv(sys.executable, ['python'] + sys.argv)
-    except Exception as e:
-        log(f"Lỗi cập nhật: {e}", "error")
-        safe_input("Enter...")
-
 def change_android_id():
     print(f"\n{Colors.WARNING}>>> THAY ĐỔI ANDROID ID (HWID) <<<{Colors.ENDC}")
-    if shutil.which("su") is None:
+    
+    # Check Root bằng os.system (nhẹ hơn subprocess)
+    if os.system("which su > /dev/null 2>&1") != 0:
         log("Lỗi: Cần Root!", "error")
         safe_input("Enter...")
         return
+
+    # Lấy ID bằng popen (tránh lock terminal)
     try:
-        current_id = subprocess.getoutput("su -c 'settings get secure android_id'").strip()
+        current_id = os.popen("su -c 'settings get secure android_id'").read().strip()
+        if not current_id: current_id = "Unknown"
         print(f" ► ID Hiện tại: {Colors.CYAN}{current_id}{Colors.ENDC}")
-    except: current_id = "Unknown"
+    except: 
+        current_id = "Unknown"
 
     print(f"\n{Colors.CYAN}Nhập ID Mới (16 ký tự Hex):{Colors.ENDC}")
     new_id = safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] ID Mới: ").strip().lower()
@@ -141,21 +138,28 @@ def change_android_id():
         return
 
     try:
-        cmd = f"su -c 'settings put secure android_id {new_id}'"
-        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-        check_id = subprocess.getoutput("su -c 'settings get secure android_id'").strip()
-        if check_id == new_id:
-            log(f"THÀNH CÔNG! ID mới: {Colors.BOLD}{new_id}{Colors.ENDC}", "success")
+        # Chạy lệnh thay đổi
+        ret = os.system(f"su -c 'settings put secure android_id {new_id}' > /dev/null 2>&1")
+        if ret == 0:
+            # Kiểm tra lại
+            check_id = os.popen("su -c 'settings get secure android_id'").read().strip()
+            if check_id == new_id:
+                log(f"THÀNH CÔNG! ID mới: {Colors.BOLD}{new_id}{Colors.ENDC}", "success")
+            else:
+                log("Thất bại: Hệ thống chặn ghi.", "error")
         else:
-            log("Thất bại.", "error")
+            log("Lỗi thực thi lệnh Root.", "error")
+            
     except Exception as e:
         log(f"Lỗi: {e}", "error")
+    
     safe_input("\nEnter để quay lại...")
 
 def get_user_installed_packages():
     try:
-        cmd = subprocess.run(["pm", "list", "packages", "-3"], capture_output=True, text=True)
-        lines = cmd.stdout.splitlines()
+        # Dùng os.popen để đọc danh sách app an toàn hơn
+        output = os.popen("pm list packages -3").read()
+        lines = output.splitlines()
         pkgs = []
         ignore_prefixes = [
             "com.android", "android", "com.google", "com.samsung", "com.sec", 
@@ -190,16 +194,19 @@ def force_stop_package(pkg_name):
         if use_adb:
             run_cmd_safe(["adb", "shell", "am", "force-stop", pkg_name])
         else:
-            subprocess.run(f"su -c 'am force-stop {pkg_name}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            # Dùng os.system cho lệnh đơn giản
+            os.system(f"su -c 'am force-stop {pkg_name}' > /dev/null 2>&1")
     except: pass
 
 def inject_cookie(pkg_name, cookie):
     print(f"\n{Colors.WARNING}Đang nạp Cookie...{Colors.ENDC}")
     force_stop_package(pkg_name)
-    cmd_find = f"su -c 'find /data/data/{pkg_name}/shared_prefs -name \"*.xml\"'"
+    
+    # Tìm file xml an toàn
     try:
-        res = subprocess.run(cmd_find, shell=True, capture_output=True, text=True)
-        xml_files = res.stdout.splitlines()
+        output = os.popen(f"su -c 'find /data/data/{pkg_name}/shared_prefs -name \"*.xml\"'").read()
+        xml_files = output.splitlines()
+        
         target_xml = None
         if not xml_files:
             log("Không tìm thấy data game.", "error")
@@ -209,11 +216,14 @@ def inject_cookie(pkg_name, cookie):
                 target_xml = f
                 break
         if not target_xml: target_xml = xml_files[0]
-        subprocess.run(f"su -c \"sed -i '/ROBLOSECURITY/d' {target_xml}\"", shell=True, stdin=subprocess.DEVNULL)
+        
+        # Thực thi lệnh sed
+        os.system(f"su -c \"sed -i '/ROBLOSECURITY/d' {target_xml}\" > /dev/null 2>&1")
         new_line = f'<string name=\\"ROBLOSECURITY\\">{cookie}</string>'
         cmd_sed = f"su -c \"sed -i '$d' {target_xml} && echo '{new_line}' >> {target_xml} && echo '</map>' >> {target_xml}\""
-        subprocess.run(cmd_sed, shell=True, stdin=subprocess.DEVNULL)
-        subprocess.run(f"su -c 'chmod 660 {target_xml}'", shell=True, stdin=subprocess.DEVNULL)
+        os.system(f"{cmd_sed} > /dev/null 2>&1")
+        os.system(f"su -c 'chmod 660 {target_xml}' > /dev/null 2>&1")
+        
         log("Thành công!", "success")
     except:
         log("Lỗi.", "error")
@@ -436,12 +446,12 @@ class App:
 
     def install_apk(self, path):
         cmds = ["settings put global package_verifier_enable 0", "settings put global upload_apk_enable 0"]
-        for c in cmds: subprocess.run(f"su -c '{c}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        for c in cmds: os.system(f"su -c '{c}' > /dev/null 2>&1")
         print(f"-> Cài đặt: {Colors.BOLD}{os.path.basename(path)}{Colors.ENDC}")
         if os.environ.get("USE_ADB") == "1":
             run_cmd_safe(["adb", "install", "-r", "-g", "-d", "--bypass-low-target-sdk-block", path])
         else:
-            subprocess.run(f"su -c 'pm install -r -g -d \"{path}\"'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            os.system(f"su -c 'pm install -r -g -d \"{path}\"' > /dev/null 2>&1")
 
     def process_file(self, file_path, save_path):
         if file_path.lower().endswith(".zip"):
@@ -528,8 +538,6 @@ class App:
             print("8. Xóa Pak đang lưu")
             print("9. Xóa Place ID đang lưu")
             print("10. Xóa Toàn bộ Config")
-            print(f"{Colors.BOLD}--- HỆ THỐNG ---{Colors.ENDC}")
-            print("11. Cập nhật Tool (GitHub)")
             print("0. Thoát")
             
             c = safe_input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
@@ -543,7 +551,6 @@ class App:
             elif c == '8': self.clear_pak_config()
             elif c == '9': self.clear_place_id()
             elif c == '10': self.clear_all_data()
-            elif c == '11': update_tool()
             elif c == '0': sys.exit()
 
 if __name__ == "__main__":
