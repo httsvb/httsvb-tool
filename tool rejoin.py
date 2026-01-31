@@ -51,6 +51,7 @@ def print_banner():
     clear_screen()
     print(f"{Colors.CYAN}{Colors.BOLD}╔═══════════════════════════════════════════╗{Colors.ENDC}")
     print(f"{Colors.CYAN}{Colors.BOLD}║        AUTO REJOIN | BY HTTSVB            ║{Colors.ENDC}")
+    print(f"{Colors.CYAN}{Colors.BOLD}║      {Colors.GREEN}Fix lỗi Login Cookie & Kết nối{Colors.ENDC}{Colors.CYAN}       ║{Colors.ENDC}")
     print(f"{Colors.CYAN}{Colors.BOLD}╚═══════════════════════════════════════════╝{Colors.ENDC}")
     print(f"{Colors.HEADER} ► System: Android/Termux{Colors.ENDC}")
     print("---------------------------------------------")
@@ -174,82 +175,53 @@ def force_stop_package(pkg_name):
             os.system(f"su -c 'am force-stop {pkg_name}' > /dev/null 2>&1")
     except: pass
 
-def grant_overlay_permission(pkg_name):
-    """Cấp quyền Floating Window bằng lệnh chuẩn"""
-    use_adb = os.environ.get("USE_ADB") == "1"
-    # Thử 2 kiểu lệnh (cmd appops và appops thường)
-    cmds = [
-        f"cmd appops set {pkg_name} SYSTEM_ALERT_WINDOW allow",
-        f"appops set {pkg_name} SYSTEM_ALERT_WINDOW allow"
-    ]
-    
-    success = False
-    for cmd in cmds:
-        try:
-            if use_adb:
-                res = subprocess.run(["adb", "shell"] + cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if res.returncode == 0: success = True
-            else:
-                # Chạy bằng SU
-                res = os.system(f"su -c '{cmd}' > /dev/null 2>&1")
-                if res == 0: success = True
-        except: pass
-    
-    return success
-
 def inject_cookie(pkg_name, cookie):
-    print(f"\n{Colors.WARNING}Đang nạp Cookie (Advanced)...{Colors.ENDC}")
+    print(f"\n{Colors.WARNING}Đang nạp Cookie (Fix Permission)...{Colors.ENDC}")
+    # 1. Kill App trước khi làm bất cứ gì
     force_stop_package(pkg_name)
     
-    # 1. Tìm file XML
     cmd_find = f"su -c 'find /data/data/{pkg_name}/shared_prefs -name \"*.xml\"'"
     try:
         res = subprocess.run(cmd_find, shell=True, capture_output=True, text=True)
         xml_files = res.stdout.splitlines()
         target_xml = None
-        
         if not xml_files:
             log("Không tìm thấy data game. Hãy vào game 1 lần trước!", "error")
             return
-            
-        # Tìm file có tên giống package trước, nếu không lấy file bất kỳ (thường là com.roblox.client.xml)
+        
+        # Ưu tiên tìm file có tên package
         for f in xml_files:
-            if pkg_name in f or "roblox" in f:
+            if pkg_name in f:
                 target_xml = f
                 break
         if not target_xml: target_xml = xml_files[0]
         
-        log(f"File Config: {os.path.basename(target_xml)}", "info")
-
-        # 2. Đọc nội dung file ra
-        # Dùng cat để đọc file root
+        # 2. Đọc nội dung file gốc
         content_bytes = subprocess.check_output(f"su -c 'cat {target_xml}'", shell=True)
         content = content_bytes.decode('utf-8', errors='ignore')
 
-        # 3. Xử lý chuỗi XML bằng Python (An toàn hơn sed)
-        # Nếu đã có ROBLOSECURITY thì thay thế, chưa có thì thêm vào
+        # 3. Chỉnh sửa nội dung
         key_pattern = r'<string name="ROBLOSECURITY">.*?</string>'
         new_entry = f'<string name="ROBLOSECURITY">{cookie}</string>'
         
         if re.search(key_pattern, content):
             new_content = re.sub(key_pattern, new_entry, content)
         else:
-            # Chèn vào trước thẻ đóng </map>
             new_content = content.replace('</map>', f'    {new_entry}\n</map>')
 
-        # 4. Ghi lại file
-        # Tạo file tạm trong bộ nhớ Termux
+        # 4. Ghi file AN TOÀN (Giữ nguyên quyền sở hữu)
         temp_file = "temp_cookie.xml"
         with open(temp_file, "w", encoding="utf-8") as f:
             f.write(new_content)
         
-        # Copy đè vào hệ thống
-        os.system(f"su -c 'cp {os.path.abspath(temp_file)} {target_xml}'")
-        os.system(f"su -c 'chmod 660 {target_xml}'")
-        os.remove(temp_file) # Xóa file tạm
-
-        log("Thành công! Hãy mở game kiểm tra.", "success")
+        # Dùng lệnh cat để ghi đè nội dung thay vì cp (cp sẽ làm thay đổi chủ sở hữu file thành root)
+        os.system(f"su -c 'cat {os.path.abspath(temp_file)} > {target_xml}'")
         
+        os.remove(temp_file)
+        
+        # Kill app lần cuối để đảm bảo nó reload lại file mới
+        force_stop_package(pkg_name)
+        log("Thành công! Hãy mở game kiểm tra.", "success")
     except Exception as e:
         log(f"Lỗi: {e}", "error")
 
@@ -321,7 +293,7 @@ class Downloader:
             
             with open(dest_path, 'wb') as f:
                 downloaded = 0
-                block_sz = 1024 * 1024 
+                block_sz = 32 * 1024 * 1024 
                 while True:
                     buffer = response.read(block_sz)
                     if not buffer: break
@@ -469,26 +441,6 @@ class App:
         except: pass
         safe_input("Enter...")
 
-    def run_floating_permission(self):
-        if not self.target_packages:
-            print("Chưa chọn Pak nào!")
-            time.sleep(1)
-            return
-        
-        print(f"\n{Colors.WARNING}>>> BẬT MENU HACK (FLOATING) <<<{Colors.ENDC}")
-        print(f"Đang cấp quyền cho {len(self.target_packages)} App...")
-        
-        count = 0
-        for pkg in self.target_packages:
-            if grant_overlay_permission(pkg):
-                print(f" [OK] {pkg}")
-                count += 1
-            else:
-                print(f" [Lỗi] {pkg} (Cần Root)")
-        
-        log(f"Hoàn thành {count}/{len(self.target_packages)}.", "success")
-        safe_input("Enter...")
-
     def install_apk(self, path):
         cmds = ["settings put global package_verifier_enable 0", "settings put global upload_apk_enable 0"]
         for c in cmds: subprocess.run(f"su -c '{c}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
@@ -569,11 +521,10 @@ class App:
             print(f"5. Cài đặt Hack (Store)")
             print(f"6. Nạp Cookie Login (Root)")
             print(f"7. Fake HWID / Android ID (Root)")
-            print(f"8. Bật Menu Hack (Auto Floating)")
             print(f"{Colors.BOLD}--- XÓA DỮ LIỆU ---{Colors.ENDC}")
-            print("9. Xóa Pak đang lưu")
-            print("10. Xóa Place ID đang lưu")
-            print("11. Xóa Toàn bộ Config")
+            print("8. Xóa Pak đang lưu")
+            print("9. Xóa Place ID đang lưu")
+            print("10. Xóa Toàn bộ Config")
             print("0. Thoát")
             
             c = safe_input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
@@ -584,10 +535,9 @@ class App:
             elif c == '5': self.run_mod_menu()
             elif c == '6': self.run_cookie_login()
             elif c == '7': change_android_id()
-            elif c == '8': self.run_floating_permission()
-            elif c == '9': self.clear_pak_config()
-            elif c == '10': self.clear_place_id()
-            elif c == '11': self.clear_all_data()
+            elif c == '8': self.clear_pak_config()
+            elif c == '9': self.clear_place_id()
+            elif c == '10': self.clear_all_data()
             elif c == '0': sys.exit()
 
 if __name__ == "__main__":
