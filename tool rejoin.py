@@ -16,6 +16,10 @@ import random
 from urllib.parse import urlparse, parse_qs
 from http.cookiejar import CookieJar
 
+# --- CẤU HÌNH ---
+UPDATE_URL = "https://raw.githubusercontent.com/httsvb/httsvb-tool/refs/heads/main/tool%20rejoin.py"
+CONFIG_FILE = "roblox_tool_config.json"
+
 KNOWN_CLONES = [
     "com.roblox.client",
     "vnx.iwr.jmv", "wue.yg.gh", "zbx.zf.uk", "tfzv.anol.bx",
@@ -32,7 +36,6 @@ MOD_LIST = [
         "url": DRIVE_LINK
     },
 ]
-CONFIG_FILE = "roblox_tool_config.json"
 
 class Colors:
     HEADER = '\033[95m'
@@ -89,6 +92,23 @@ def delete_all_config():
         os.remove(CONFIG_FILE)
         return True
     return False
+
+def update_tool():
+    print(f"\n{Colors.WARNING}>>> ĐANG CẬP NHẬT TOOL TỪ GITHUB... <<<{Colors.ENDC}")
+    try:
+        req = urllib.request.Request(UPDATE_URL)
+        with urllib.request.urlopen(req) as response:
+            content = response.read()
+            
+        with open(sys.argv[0], 'wb') as f:
+            f.write(content)
+            
+        print(f"{Colors.GREEN}Cập nhật thành công! Đang khởi động lại...{Colors.ENDC}")
+        time.sleep(1)
+        os.execv(sys.executable, ['python'] + sys.argv)
+    except Exception as e:
+        log(f"Lỗi cập nhật: {e}", "error")
+        input("Enter...")
 
 def change_android_id():
     print(f"\n{Colors.WARNING}>>> THAY ĐỔI ANDROID ID (HWID) <<<{Colors.ENDC}")
@@ -420,17 +440,33 @@ class App:
                 return
             print(f"\n{Colors.WARNING}DANH SÁCH:{Colors.ENDC}")
             for i, apk in enumerate(apk_list, 1): print(f"{Colors.BOLD}{i}. {os.path.basename(apk)}{Colors.ENDC}")
-            raw_choices = input(f"\n[{Colors.WARNING}?{Colors.ENDC}] Nhập số (VD: 1 3): ").strip()
+            
+            # --- ĐỔI LOGIC CHỌN SỐ LƯỢNG TẠI ĐÂY ---
             try:
-                indices = [int(x) - 1 for x in raw_choices.split() if x.isdigit()]
-                selected = [apk_list[idx] for idx in indices if 0 <= idx < len(apk_list)]
+                count_input = input(f"\n[{Colors.WARNING}?{Colors.ENDC}] Nhập số lượng bản muốn cài (VD: 3): ").strip()
+                count = int(count_input)
+                
+                if count <= 0:
+                    print("Số lượng phải lớn hơn 0.")
+                    return
+
+                if count > len(apk_list):
+                    count = len(apk_list)
+
+                selected = apk_list[:count] # Lấy "count" bản đầu tiên
+
                 if selected:
-                    print(f"\n{Colors.GREEN}>>> CÀI ĐẶT...{Colors.ENDC}")
+                    print(f"\n{Colors.GREEN}>>> CÀI ĐẶT {len(selected)} PHIÊN BẢN...{Colors.ENDC}")
                     for apk in selected:
                         self.install_apk(apk)
                         time.sleep(1)
                     print(f"\n{Colors.GREEN}Xong!{Colors.ENDC}")
-            except: pass
+            except ValueError:
+                print("Lỗi: Nhập số không hợp lệ.")
+            except Exception as e:
+                print(f"Lỗi: {e}")
+            # ---------------------------------------
+
         elif file_path.lower().endswith(".apk"):
             q = input(f"[{Colors.WARNING}?{Colors.ENDC}] Cài đặt? (y/n): ").lower()
             if q == 'y': self.install_apk(file_path)
@@ -483,6 +519,8 @@ class App:
             print("8. Xóa Pak đang lưu")
             print("9. Xóa Place ID đang lưu")
             print("10. Xóa Toàn bộ Config")
+            print(f"{Colors.BOLD}--- HỆ THỐNG ---{Colors.ENDC}")
+            print("11. Cập nhật Tool (GitHub)")
             print("0. Thoát")
             
             c = input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
@@ -496,6 +534,7 @@ class App:
             elif c == '8': self.clear_pak_config()
             elif c == '9': self.clear_place_id()
             elif c == '10': self.clear_all_data()
+            elif c == '11': update_tool()
             elif c == '0': sys.exit()
 
 if __name__ == "__main__":
