@@ -61,21 +61,11 @@ def log(msg, type="info"):
     elif type == "warn": print(f"[{Colors.WARNING}!{Colors.ENDC}] {msg}")
     else: print(f"[*] {msg}")
 
-def reset_terminal():
-    """Reset trạng thái bàn phím để tránh bị đơ"""
-    try:
-        os.system('stty sane')
-    except: pass
-
 def safe_input(prompt):
-    """Nhập liệu an toàn, chống đơ"""
-    reset_terminal() # Reset trước khi nhập
     sys.stdout.flush()
     try:
         return input(prompt)
     except EOFError:
-        return ""
-    except KeyboardInterrupt:
         return ""
 
 def run_cmd_safe(cmd_list):
@@ -114,20 +104,14 @@ def delete_all_config():
 
 def change_android_id():
     print(f"\n{Colors.WARNING}>>> THAY ĐỔI ANDROID ID (HWID) <<<{Colors.ENDC}")
-    
-    # Check Root bằng os.system (nhẹ hơn subprocess)
-    if os.system("which su > /dev/null 2>&1") != 0:
+    if shutil.which("su") is None:
         log("Lỗi: Cần Root!", "error")
         safe_input("Enter...")
         return
-
-    # Lấy ID bằng popen (tránh lock terminal)
     try:
-        current_id = os.popen("su -c 'settings get secure android_id'").read().strip()
-        if not current_id: current_id = "Unknown"
+        current_id = subprocess.getoutput("su -c 'settings get secure android_id'").strip()
         print(f" ► ID Hiện tại: {Colors.CYAN}{current_id}{Colors.ENDC}")
-    except: 
-        current_id = "Unknown"
+    except: current_id = "Unknown"
 
     print(f"\n{Colors.CYAN}Nhập ID Mới (16 ký tự Hex):{Colors.ENDC}")
     new_id = safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] ID Mới: ").strip().lower()
@@ -138,28 +122,32 @@ def change_android_id():
         return
 
     try:
-        # Chạy lệnh thay đổi
-        ret = os.system(f"su -c 'settings put secure android_id {new_id}' > /dev/null 2>&1")
-        if ret == 0:
-            # Kiểm tra lại
-            check_id = os.popen("su -c 'settings get secure android_id'").read().strip()
-            if check_id == new_id:
-                log(f"THÀNH CÔNG! ID mới: {Colors.BOLD}{new_id}{Colors.ENDC}", "success")
-            else:
-                log("Thất bại: Hệ thống chặn ghi.", "error")
+        cmd = f"su -c 'settings put secure android_id {new_id}'"
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        check_id = subprocess.getoutput("su -c 'settings get secure android_id'").strip()
+        if check_id == new_id:
+            log(f"THÀNH CÔNG! ID mới: {Colors.BOLD}{new_id}{Colors.ENDC}", "success")
         else:
-            log("Lỗi thực thi lệnh Root.", "error")
-            
+            log("Thất bại.", "error")
     except Exception as e:
         log(f"Lỗi: {e}", "error")
-    
     safe_input("\nEnter để quay lại...")
+
+def grant_overlay_permission(pkg_name):
+    use_adb = os.environ.get("USE_ADB") == "1"
+    cmd = f"appops set {pkg_name} SYSTEM_ALERT_WINDOW allow"
+    try:
+        if use_adb:
+            run_cmd_safe(["adb", "shell"] + cmd.split())
+        else:
+            os.system(f"su -c '{cmd}' > /dev/null 2>&1")
+        return True
+    except: return False
 
 def get_user_installed_packages():
     try:
-        # Dùng os.popen để đọc danh sách app an toàn hơn
-        output = os.popen("pm list packages -3").read()
-        lines = output.splitlines()
+        cmd = subprocess.run(["pm", "list", "packages", "-3"], capture_output=True, text=True)
+        lines = cmd.stdout.splitlines()
         pkgs = []
         ignore_prefixes = [
             "com.android", "android", "com.google", "com.samsung", "com.sec", 
@@ -194,19 +182,16 @@ def force_stop_package(pkg_name):
         if use_adb:
             run_cmd_safe(["adb", "shell", "am", "force-stop", pkg_name])
         else:
-            # Dùng os.system cho lệnh đơn giản
             os.system(f"su -c 'am force-stop {pkg_name}' > /dev/null 2>&1")
     except: pass
 
 def inject_cookie(pkg_name, cookie):
     print(f"\n{Colors.WARNING}Đang nạp Cookie...{Colors.ENDC}")
     force_stop_package(pkg_name)
-    
-    # Tìm file xml an toàn
+    cmd_find = f"su -c 'find /data/data/{pkg_name}/shared_prefs -name \"*.xml\"'"
     try:
-        output = os.popen(f"su -c 'find /data/data/{pkg_name}/shared_prefs -name \"*.xml\"'").read()
-        xml_files = output.splitlines()
-        
+        res = subprocess.run(cmd_find, shell=True, capture_output=True, text=True)
+        xml_files = res.stdout.splitlines()
         target_xml = None
         if not xml_files:
             log("Không tìm thấy data game.", "error")
@@ -216,14 +201,11 @@ def inject_cookie(pkg_name, cookie):
                 target_xml = f
                 break
         if not target_xml: target_xml = xml_files[0]
-        
-        # Thực thi lệnh sed
-        os.system(f"su -c \"sed -i '/ROBLOSECURITY/d' {target_xml}\" > /dev/null 2>&1")
+        subprocess.run(f"su -c \"sed -i '/ROBLOSECURITY/d' {target_xml}\"", shell=True, stdin=subprocess.DEVNULL)
         new_line = f'<string name=\\"ROBLOSECURITY\\">{cookie}</string>'
         cmd_sed = f"su -c \"sed -i '$d' {target_xml} && echo '{new_line}' >> {target_xml} && echo '</map>' >> {target_xml}\""
-        os.system(f"{cmd_sed} > /dev/null 2>&1")
-        os.system(f"su -c 'chmod 660 {target_xml}' > /dev/null 2>&1")
-        
+        subprocess.run(cmd_sed, shell=True, stdin=subprocess.DEVNULL)
+        subprocess.run(f"su -c 'chmod 660 {target_xml}'", shell=True, stdin=subprocess.DEVNULL)
         log("Thành công!", "success")
     except:
         log("Lỗi.", "error")
@@ -444,14 +426,31 @@ class App:
         except: pass
         safe_input("Enter...")
 
+    def run_floating_permission(self):
+        if not self.target_packages:
+            print("Chưa chọn Pak nào!")
+            time.sleep(1)
+            return
+        
+        print(f"\n{Colors.WARNING}>>> BẬT MENU HACK (FLOATING) <<<{Colors.ENDC}")
+        print(f"Đang cấp quyền cho {len(self.target_packages)} App...")
+        
+        for pkg in self.target_packages:
+            if grant_overlay_permission(pkg):
+                print(f" [OK] {pkg}")
+            else:
+                print(f" [Lỗi] {pkg}")
+        
+        safe_input("Enter...")
+
     def install_apk(self, path):
         cmds = ["settings put global package_verifier_enable 0", "settings put global upload_apk_enable 0"]
-        for c in cmds: os.system(f"su -c '{c}' > /dev/null 2>&1")
+        for c in cmds: subprocess.run(f"su -c '{c}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         print(f"-> Cài đặt: {Colors.BOLD}{os.path.basename(path)}{Colors.ENDC}")
         if os.environ.get("USE_ADB") == "1":
             run_cmd_safe(["adb", "install", "-r", "-g", "-d", "--bypass-low-target-sdk-block", path])
         else:
-            os.system(f"su -c 'pm install -r -g -d \"{path}\"' > /dev/null 2>&1")
+            subprocess.run(f"su -c 'pm install -r -g -d \"{path}\"'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
     def process_file(self, file_path, save_path):
         if file_path.lower().endswith(".zip"):
@@ -465,26 +464,16 @@ class App:
             try:
                 count_input = safe_input(f"\n[{Colors.WARNING}?{Colors.ENDC}] Nhập số lượng bản muốn cài (VD: 3): ").strip()
                 count = int(count_input)
-                
-                if count <= 0:
-                    print("Số lượng phải lớn hơn 0.")
-                    return
-
-                if count > len(apk_list):
-                    count = len(apk_list)
-
+                if count <= 0: return
+                if count > len(apk_list): count = len(apk_list)
                 selected = apk_list[:count]
-
                 if selected:
                     print(f"\n{Colors.GREEN}>>> CÀI ĐẶT {len(selected)} PHIÊN BẢN...{Colors.ENDC}")
                     for apk in selected:
                         self.install_apk(apk)
                         time.sleep(1)
                     print(f"\n{Colors.GREEN}Xong!{Colors.ENDC}")
-            except ValueError:
-                print("Lỗi: Nhập số không hợp lệ.")
-            except Exception as e:
-                print(f"Lỗi: {e}")
+            except: pass
 
         elif file_path.lower().endswith(".apk"):
             q = safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] Cài đặt? (y/n): ").lower()
@@ -534,10 +523,11 @@ class App:
             print(f"5. Cài đặt Hack (Store)")
             print(f"6. Nạp Cookie Login (Root)")
             print(f"7. Fake HWID / Android ID (Root)")
+            print(f"8. Bật Menu Hack (Auto Floating)")
             print(f"{Colors.BOLD}--- XÓA DỮ LIỆU ---{Colors.ENDC}")
-            print("8. Xóa Pak đang lưu")
-            print("9. Xóa Place ID đang lưu")
-            print("10. Xóa Toàn bộ Config")
+            print("9. Xóa Pak đang lưu")
+            print("10. Xóa Place ID đang lưu")
+            print("11. Xóa Toàn bộ Config")
             print("0. Thoát")
             
             c = safe_input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
@@ -548,9 +538,10 @@ class App:
             elif c == '5': self.run_mod_menu()
             elif c == '6': self.run_cookie_login()
             elif c == '7': change_android_id()
-            elif c == '8': self.clear_pak_config()
-            elif c == '9': self.clear_place_id()
-            elif c == '10': self.clear_all_data()
+            elif c == '8': self.run_floating_permission()
+            elif c == '9': self.clear_pak_config()
+            elif c == '10': self.clear_place_id()
+            elif c == '11': self.clear_all_data()
             elif c == '0': sys.exit()
 
 if __name__ == "__main__":
