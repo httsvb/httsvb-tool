@@ -16,7 +16,6 @@ import random
 from urllib.parse import urlparse, parse_qs
 from http.cookiejar import CookieJar
 
-# --- CẤU HÌNH ---
 UPDATE_URL = "https://raw.githubusercontent.com/httsvb/httsvb-tool/refs/heads/main/tool%20rejoin.py"
 CONFIG_FILE = "roblox_tool_config.json"
 
@@ -64,6 +63,18 @@ def log(msg, type="info"):
     elif type == "warn": print(f"[{Colors.WARNING}!{Colors.ENDC}] {msg}")
     else: print(f"[*] {msg}")
 
+def safe_input(prompt):
+    sys.stdout.flush()
+    try:
+        return input(prompt)
+    except EOFError:
+        return ""
+
+def run_cmd_safe(cmd_list):
+    try:
+        subprocess.run(cmd_list, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    except: pass
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -108,13 +119,13 @@ def update_tool():
         os.execv(sys.executable, ['python'] + sys.argv)
     except Exception as e:
         log(f"Lỗi cập nhật: {e}", "error")
-        input("Enter...")
+        safe_input("Enter...")
 
 def change_android_id():
     print(f"\n{Colors.WARNING}>>> THAY ĐỔI ANDROID ID (HWID) <<<{Colors.ENDC}")
     if shutil.which("su") is None:
         log("Lỗi: Cần Root!", "error")
-        input("Enter...")
+        safe_input("Enter...")
         return
     try:
         current_id = subprocess.getoutput("su -c 'settings get secure android_id'").strip()
@@ -122,16 +133,16 @@ def change_android_id():
     except: current_id = "Unknown"
 
     print(f"\n{Colors.CYAN}Nhập ID Mới (16 ký tự Hex):{Colors.ENDC}")
-    new_id = input(f"[{Colors.WARNING}?{Colors.ENDC}] ID Mới: ").strip().lower()
+    new_id = safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] ID Mới: ").strip().lower()
 
     if len(new_id) != 16:
         log("Lỗi: ID phải đúng 16 ký tự.", "error")
-        input("Enter...")
+        safe_input("Enter...")
         return
 
     try:
         cmd = f"su -c 'settings put secure android_id {new_id}'"
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         check_id = subprocess.getoutput("su -c 'settings get secure android_id'").strip()
         if check_id == new_id:
             log(f"THÀNH CÔNG! ID mới: {Colors.BOLD}{new_id}{Colors.ENDC}", "success")
@@ -139,7 +150,7 @@ def change_android_id():
             log("Thất bại.", "error")
     except Exception as e:
         log(f"Lỗi: {e}", "error")
-    input("\nEnter để quay lại...")
+    safe_input("\nEnter để quay lại...")
 
 def get_user_installed_packages():
     try:
@@ -177,9 +188,9 @@ def force_stop_package(pkg_name):
     use_adb = os.environ.get("USE_ADB") == "1"
     try:
         if use_adb:
-            subprocess.run(["adb", "shell", "am", "force-stop", pkg_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run_cmd_safe(["adb", "shell", "am", "force-stop", pkg_name])
         else:
-            subprocess.run(f"su -c 'am force-stop {pkg_name}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(f"su -c 'am force-stop {pkg_name}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     except: pass
 
 def inject_cookie(pkg_name, cookie):
@@ -198,11 +209,11 @@ def inject_cookie(pkg_name, cookie):
                 target_xml = f
                 break
         if not target_xml: target_xml = xml_files[0]
-        subprocess.run(f"su -c \"sed -i '/ROBLOSECURITY/d' {target_xml}\"", shell=True)
+        subprocess.run(f"su -c \"sed -i '/ROBLOSECURITY/d' {target_xml}\"", shell=True, stdin=subprocess.DEVNULL)
         new_line = f'<string name=\\"ROBLOSECURITY\\">{cookie}</string>'
         cmd_sed = f"su -c \"sed -i '$d' {target_xml} && echo '{new_line}' >> {target_xml} && echo '</map>' >> {target_xml}\""
-        subprocess.run(cmd_sed, shell=True)
-        subprocess.run(f"su -c 'chmod 660 {target_xml}'", shell=True)
+        subprocess.run(cmd_sed, shell=True, stdin=subprocess.DEVNULL)
+        subprocess.run(f"su -c 'chmod 660 {target_xml}'", shell=True, stdin=subprocess.DEVNULL)
         log("Thành công!", "success")
     except:
         log("Lỗi.", "error")
@@ -305,7 +316,7 @@ class App:
     def set_id(self):
         try:
             print(f"ID: {self.place_id}")
-            pid = input(f"[{Colors.WARNING}?{Colors.ENDC}] ID Mới: ").strip()
+            pid = safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] ID Mới: ").strip()
             if pid.isdigit(): 
                 self.place_id = pid
                 save_config("place_id", pid)
@@ -330,7 +341,7 @@ class App:
             for p in found: print(f" - {p}")
         else:
             log("Không tìm thấy Pak phù hợp.", "warn")
-        input("Enter...")
+        safe_input("Enter...")
 
     def manual_select_packages(self):
         print(f"\n{Colors.WARNING}>>> CHỌN THỦ CÔNG <<<{Colors.ENDC}")
@@ -339,7 +350,7 @@ class App:
             log("Trống.", "error")
             return
         for i, p in enumerate(pkgs, 1): print(f"{Colors.BOLD}{i}. {p}{Colors.ENDC}")
-        raw = input(f"[{Colors.CYAN}?{Colors.ENDC}] Chọn số (VD: 1 3): ").strip()
+        raw = safe_input(f"[{Colors.CYAN}?{Colors.ENDC}] Chọn số (VD: 1 3): ").strip()
         try:
             indices = [int(x) - 1 for x in raw.split() if x.isdigit()]
             selected = [pkgs[idx] for idx in indices if 0 <= idx < len(pkgs)]
@@ -348,26 +359,26 @@ class App:
                 save_config("target_packages", self.target_packages)
                 log(f"Đã lưu {len(selected)} App.", "success")
         except: pass
-        input("Enter...")
+        safe_input("Enter...")
 
     def clear_pak_config(self):
         self.target_packages = []
         delete_config_key("target_packages")
         log("Đã xóa Pak.", "success")
-        input("Enter...")
+        safe_input("Enter...")
 
     def clear_place_id(self):
         self.place_id = ""
         delete_config_key("place_id")
         log("Đã xóa ID.", "success")
-        input("Enter...")
+        safe_input("Enter...")
 
     def clear_all_data(self):
         self.place_id = ""
         self.target_packages = []
         delete_all_config()
         log("Đã Reset toàn bộ.", "success")
-        input("Enter...")
+        safe_input("Enter...")
 
     def run_auto(self):
         if not self.place_id:
@@ -379,7 +390,7 @@ class App:
             time.sleep(1)
             return
         try: 
-            delay_min = float(input(f"[{Colors.WARNING}?{Colors.ENDC}] Thời gian treo (phút): ").strip() or 20)
+            delay_min = float(safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] Thời gian treo (phút): ").strip() or 20)
             delay_sec = int(delay_min * 60)
         except: delay_sec = 1200 
 
@@ -395,7 +406,7 @@ class App:
                     print(f"\n{Colors.CYAN}>>> APP: {pkg} <<<{Colors.ENDC}")
                     base_cmd = ["am", "start", "-a", "android.intent.action.VIEW", "-d", uri, "-p", pkg]
                     final_cmd = ["adb", "shell"] + base_cmd if use_adb else base_cmd
-                    subprocess.run(final_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    run_cmd_safe(final_cmd)
                     
                     remaining = delay_sec
                     while remaining > 0:
@@ -415,22 +426,22 @@ class App:
         print(f"\n{Colors.WARNING}>>> NẠP COOKIE (ROOT) <<<{Colors.ENDC}")
         for i, p in enumerate(self.target_packages, 1): print(f"{i}. {p}")
         try:
-            idx = int(input("Số: ")) - 1
+            idx = int(safe_input("Số: ")) - 1
             if 0 <= idx < len(self.target_packages):
                 pkg = self.target_packages[idx]
-                cookie = input(f"[{Colors.CYAN}?{Colors.ENDC}] Cookie: ").strip()
+                cookie = safe_input(f"[{Colors.CYAN}?{Colors.ENDC}] Cookie: ").strip()
                 if cookie: inject_cookie(pkg, cookie)
         except: pass
-        input("Enter...")
+        safe_input("Enter...")
 
     def install_apk(self, path):
         cmds = ["settings put global package_verifier_enable 0", "settings put global upload_apk_enable 0"]
-        for c in cmds: subprocess.run(f"su -c '{c}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for c in cmds: subprocess.run(f"su -c '{c}'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         print(f"-> Cài đặt: {Colors.BOLD}{os.path.basename(path)}{Colors.ENDC}")
         if os.environ.get("USE_ADB") == "1":
-            subprocess.run(["adb", "install", "-r", "-g", "-d", "--bypass-low-target-sdk-block", path])
+            run_cmd_safe(["adb", "install", "-r", "-g", "-d", "--bypass-low-target-sdk-block", path])
         else:
-            subprocess.run(f"su -c 'pm install -r -g -d \"{path}\"'", shell=True)
+            subprocess.run(f"su -c 'pm install -r -g -d \"{path}\"'", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
     def process_file(self, file_path, save_path):
         if file_path.lower().endswith(".zip"):
@@ -441,9 +452,8 @@ class App:
             print(f"\n{Colors.WARNING}DANH SÁCH:{Colors.ENDC}")
             for i, apk in enumerate(apk_list, 1): print(f"{Colors.BOLD}{i}. {os.path.basename(apk)}{Colors.ENDC}")
             
-            # --- ĐỔI LOGIC CHỌN SỐ LƯỢNG TẠI ĐÂY ---
             try:
-                count_input = input(f"\n[{Colors.WARNING}?{Colors.ENDC}] Nhập số lượng bản muốn cài (VD: 3): ").strip()
+                count_input = safe_input(f"\n[{Colors.WARNING}?{Colors.ENDC}] Nhập số lượng bản muốn cài (VD: 3): ").strip()
                 count = int(count_input)
                 
                 if count <= 0:
@@ -453,7 +463,7 @@ class App:
                 if count > len(apk_list):
                     count = len(apk_list)
 
-                selected = apk_list[:count] # Lấy "count" bản đầu tiên
+                selected = apk_list[:count]
 
                 if selected:
                     print(f"\n{Colors.GREEN}>>> CÀI ĐẶT {len(selected)} PHIÊN BẢN...{Colors.ENDC}")
@@ -465,10 +475,9 @@ class App:
                 print("Lỗi: Nhập số không hợp lệ.")
             except Exception as e:
                 print(f"Lỗi: {e}")
-            # ---------------------------------------
 
         elif file_path.lower().endswith(".apk"):
-            q = input(f"[{Colors.WARNING}?{Colors.ENDC}] Cài đặt? (y/n): ").lower()
+            q = safe_input(f"[{Colors.WARNING}?{Colors.ENDC}] Cài đặt? (y/n): ").lower()
             if q == 'y': self.install_apk(file_path)
 
     def run_mod_menu(self):
@@ -476,7 +485,7 @@ class App:
             print_banner()
             for i, mod in enumerate(MOD_LIST, 1): print(f"{Colors.BOLD}{i}. {mod['name']}{Colors.ENDC}")
             print(f"{Colors.BOLD}0. Quay lại{Colors.ENDC}")
-            choice = input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
+            choice = safe_input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
             if choice == '0': return
             selected_mod = None
             try:
@@ -489,9 +498,9 @@ class App:
             file_path = self.downloader.download_auto(selected_mod["url"], save_path)
             if not file_path:
                 print("Lỗi tải.")
-                input("Enter...")
+                safe_input("Enter...")
             else: self.process_file(file_path, save_path)
-            input("Enter...")
+            safe_input("Enter...")
 
     def menu(self):
         while True:
@@ -523,7 +532,7 @@ class App:
             print("11. Cập nhật Tool (GitHub)")
             print("0. Thoát")
             
-            c = input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
+            c = safe_input(f"\n{Colors.CYAN}Chọn >> {Colors.ENDC}").strip()
             if c == '1': self.auto_setup_packages()
             elif c == '2': self.manual_select_packages()
             elif c == '3': self.set_id()
